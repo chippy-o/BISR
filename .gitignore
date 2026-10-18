@@ -1,0 +1,8 @@
+# simulation outputs
+sim/build/
+sim/modelsim/work/
+sim/modelsim/transcript
+*.wlf
+*.vcd
+*.vvp
+*.log

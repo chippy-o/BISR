@@ -9,7 +9,8 @@
 #   make random       random campaign on all three (N=$(NRAND), SEED=$(SEED))
 #   make clean
 #
-# Override sizes, e.g.  make shared ROWS=64 NMEM=4
+# Override sizes, e.g.  make shared ROWS=64 NMEM=4 FTD=16 NGLB=4
+# (run `make clean` between different sizes)
 #=============================================================================
 
 IVERILOG = iverilog
@@ -20,10 +21,13 @@ OUT      = build
 
 ROWS  ?= 256
 NMEM  ?= 2
+FTD   ?= 8
+NGLB  ?= 2
 NRAND ?= 200
 SEED  ?= 1
 
-TOP_PARAMS = -Ptb_top_scenarios.ROWS=$(ROWS) -Ptb_top_scenarios.N_MEM=$(NMEM)
+TOP_PARAMS = -Ptb_top_scenarios.ROWS=$(ROWS) -Ptb_top_scenarios.N_MEM=$(NMEM) \
+             -Ptb_top_scenarios.FT_DEPTH=$(FTD) -Ptb_top_scenarios.N_GLOBAL=$(NGLB)
 
 .PHONY: all unit shared dedicated equal random clean
 

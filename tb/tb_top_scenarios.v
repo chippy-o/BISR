@@ -17,9 +17,10 @@
 // Modes (plusargs)
 //   (none)              directed scenarios S1..S8
 //   +RANDOM=<n>         n random fault sets   (+SEED=<s> optional)
-//   +FAULTFILE=<path>   one run with faults read from a file, one per line:
+//   +FAULTFILE=<path>   faults read from a file, one per line:
 //                         <target> <mem> <spare> <row> <bit> <type>
-//                       target: 0 main, 1 local spare, 2 global spare
+//                       target: 0 main, 1 local spare, 2 global spare,
+//                               9 = end of run (allows many runs per file)
 //                       type  : 0 SA0, 1 SA1, 2 TF-up, 3 TF-down
 //
 // Parameters: ARCH, N_MEM, ROWS, WIDTH, N_LOCAL, N_GLOBAL, FT_DEPTH, SPARE_GATING
@@ -153,6 +154,45 @@ module tb_top_scenarios;
     reg     rf_gsp [0:NGA-1];                   // global spare k faulty
 
     integer i_tmp;
+
+    // ------------------------------------------------------------------
+    // Per-memory results read from the DUT's own tables (for metrics):
+    //   pm_det[m] : faulty rows of memory m logged in the fault table
+    //   pm_rep[m] : faulty rows of memory m given a spare (repair table)
+    // Filled when pm_ev fires (after a BISR run).
+    // ------------------------------------------------------------------
+    localparam MEMW = (N_MEM > 1) ? $clog2(N_MEM) : 1;
+    integer pm_det [0:N_MEM-1];
+    integer pm_rep [0:N_MEM-1];
+    event   pm_ev;
+
+    generate
+        if (ARCH == 0) begin : g_pm_shared
+            for (g = 0; g < N_MEM; g = g + 1) begin : g_m
+                integer i;
+                always @(pm_ev) begin
+                    pm_det[g] = 0; pm_rep[g] = 0;
+                    for (i = 0; i < FT_DEPTH; i = i + 1) begin
+                        if (g_dut.dut.ft_valid[i] && g_dut.dut.ft_mem[i*MEMW +: MEMW] == g)
+                            pm_det[g] = pm_det[g] + 1;
+                        if (g_dut.dut.rt_valid[i] && g_dut.dut.rt_mem[i*MEMW +: MEMW] == g)
+                            pm_rep[g] = pm_rep[g] + 1;
+                    end
+                end
+            end
+        end else begin : g_pm_dedicated
+            for (g = 0; g < N_MEM; g = g + 1) begin : g_m
+                integer i;
+                always @(pm_ev) begin
+                    pm_det[g] = 0; pm_rep[g] = 0;
+                    for (i = 0; i < FT_DEPTH; i = i + 1) begin
+                        if (g_dut.dut.g_inst[g].u_bisr.ft_valid[i]) pm_det[g] = pm_det[g] + 1;
+                        if (g_dut.dut.g_inst[g].u_bisr.rt_valid[i]) pm_rep[g] = pm_rep[g] + 1;
+                    end
+                end
+            end
+        end
+    endgenerate
 
     task clear_faults;
         begin
@@ -343,6 +383,13 @@ module tb_top_scenarios;
                    ARCH, N_MEM, N_LOCAL, NG, pass, unrep, ovf, vfail, fcnt, gused);
             for (m = 0; m < N_MEM; m = m + 1)
                 $write("%0d%0s", lused[m*LCNT_W +: LCNT_W], (m < N_MEM-1) ? "," : "");
+            -> pm_ev; #0;
+            $write(" inj=");
+            for (m = 0; m < N_MEM; m = m + 1) $write("%0d%0s", rows_m[m], (m < N_MEM-1) ? "," : "");
+            $write(" det=");
+            for (m = 0; m < N_MEM; m = m + 1) $write("%0d%0s", pm_det[m], (m < N_MEM-1) ? "," : "");
+            $write(" rep=");
+            for (m = 0; m < N_MEM; m = m + 1) $write("%0d%0s", pm_rep[m], (m < N_MEM-1) ? "," : "");
             $write(" cycles=%0d match=%0d\n", cyc, (errs == 0));
         end
     endtask
@@ -405,6 +452,34 @@ module tb_top_scenarios;
                 inject(`TGT_MAIN, 1, 0, 9, 4, `FT_TF_UP);
                 run_check("S8 2+2 rows");
             end
+
+            // ---- scenarios that reach every SRAM (meaningful for N_MEM > 2) ----
+
+            // S9: one faulty row in EVERY SRAM -> all local spares, no globals
+            clear_faults;
+            for (r = 0; r < N_MEM; r = r + 1)
+                inject(`TGT_MAIN, r, 0, (13 + 17*r) % ROWS, r % WIDTH, r % 4);
+            run_check("S9 1 row in every SRAM");
+
+            // S10: the LAST SRAM gets N_LOCAL + N_GLOBAL rows -> global pool
+            //      must reach the highest-index memory
+            if (N_MEM > 2) begin
+                clear_faults;
+                for (r = 0; r < N_LOCAL + N_GLOBAL; r = r + 1)
+                    inject(`TGT_MAIN, N_MEM-1, 0, (3 + 11*r) % ROWS, r % WIDTH, `FT_SA1);
+                run_check("S10 last SRAM uses pool");
+            end
+
+            // S11: two non-adjacent high-index SRAMs each need one global
+            //      spare, everyone else has one fault
+            if (N_MEM > 3 && N_MEM + 2 <= FT_DEPTH) begin
+                clear_faults;
+                for (r = 0; r < N_MEM; r = r + 1)
+                    inject(`TGT_MAIN, r, 0, 30 % ROWS, 1, `FT_SA0);
+                inject(`TGT_MAIN, N_MEM-1, 0, 60 % ROWS, 2, `FT_TF_UP);
+                inject(`TGT_MAIN, N_MEM-3, 0, 90 % ROWS, 5, `FT_TF_DOWN);
+                run_check("S11 spread + 2 globals");
+            end
         end
     endtask
 
@@ -438,24 +513,36 @@ module tb_top_scenarios;
     endtask
 
     // ------------------------------------------------------------------
-    // Fault file (one run)
+    // Fault file
+    //   One fault per line: <target> <mem> <spare> <row> <bit> <type>.
+    //   A line whose target is 9 ends a run (the BISR is run and checked,
+    //   then faults are cleared) - this lets one simulation execute many
+    //   fault sets. A file with no "9" line is a single run.
     // ------------------------------------------------------------------
     task file_run(input [8*256-1:0] fname);
-        integer fd, cnt, t, m, s, r, b, ty;
+        integer fd, cnt, t, m, s, r, b, ty, nruns;
         begin
             clear_faults;
+            nruns = 0;
             fd = $fopen(fname, "r");
             if (fd == 0) begin
                 $display("ERROR: cannot open fault file %0s", fname);
                 total_errors = total_errors + 1;
             end else begin
+                quiet = 1;
                 cnt = $fscanf(fd, "%d %d %d %d %d %d\n", t, m, s, r, b, ty);
                 while (cnt == 6) begin
-                    inject(t, m, s, r, b, ty);
+                    if (t == 9) begin
+                        run_check("file");
+                        nruns = nruns + 1;
+                        clear_faults;
+                    end else
+                        inject(t, m, s, r, b, ty);
                     cnt = $fscanf(fd, "%d %d %d %d %d %d\n", t, m, s, r, b, ty);
                 end
                 $fclose(fd);
-                run_check("file");
+                if (nruns == 0) run_check("file");
+                quiet = 0;
             end
         end
     endtask

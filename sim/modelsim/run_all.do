@@ -37,6 +37,11 @@ vsim -c -quiet -GARCH=1 -GN_LOCAL=2 work.tb_top_scenarios
 run -all
 quit -sim
 
+# clustered: 8 SRAMs in 2 clusters of 4, 4 global spares per cluster
+vsim -c -quiet -GARCH=2 -GN_MEM=8 -GCLUSTER=4 -GN_GLOBAL=4 -GFT_DEPTH=8 -GROWS=64 work.tb_top_scenarios
+run -all
+quit -sim
+
 # random campaign on the shared design
 vsim -c -quiet -GARCH=0 work.tb_top_scenarios +RANDOM=200 +SEED=1
 run -all

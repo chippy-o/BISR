@@ -17,7 +17,9 @@
 //   ROWS, WIDTH  SRAM size (rows x bits)
 //   N_LOCAL      local spare rows per SRAM (>= 1)
 //   N_GLOBAL     shared global spare rows (0 = no pool)
-//   FT_DEPTH     fault-table / repair-table entries
+//   FT_DEPTH     fault-table entries. Default = total spares: a single-pass
+//                BIRA can never repair more rows than it has spares, and
+//                table overflow already flags "unrepairable".
 //   SPARE_GATING 1 = selective spare activation, 0 = all spares clocked
 //
 // The `derived` parameters must not be overridden.
@@ -31,7 +33,7 @@ module shared_bisr_top #(
     parameter WIDTH        = 8,
     parameter N_LOCAL      = 1,
     parameter N_GLOBAL     = 2,
-    parameter FT_DEPTH     = 8,
+    parameter FT_DEPTH     = N_MEM*N_LOCAL + N_GLOBAL,  // = total spares (see below)
     parameter SPARE_GATING = 1,
     // derived - do not override
     parameter ADDR_W = (ROWS > 1)     ? $clog2(ROWS)         : 1,
@@ -177,7 +179,6 @@ module shared_bisr_top #(
     // BIRA
     // ==================================================================
     wire              w_rt_we, w_rt_valid, w_rt_is_global;
-    wire [FIDX_W-1:0] w_rt_idx;
     wire [MEM_W-1:0]  w_rt_mem;
     wire [ADDR_W-1:0] w_rt_row;
     wire [SIDX_W-1:0] w_rt_sidx;
@@ -206,7 +207,7 @@ module shared_bisr_top #(
         .busy         (br_busy),
         .done         (br_done),
         .rt_we        (w_rt_we),
-        .rt_idx       (w_rt_idx),
+        .rt_idx       (),                // unused: table is spare-indexed
         .rt_valid     (w_rt_valid),
         .rt_mem       (w_rt_mem),
         .rt_row       (w_rt_row),
@@ -220,37 +221,37 @@ module shared_bisr_top #(
     assign bisr_global_used = br_gused;
 
     // ==================================================================
-    // Repair table
+    // Repair table (spare-indexed: one slot per local / global spare)
     // ==================================================================
-    wire [FT_DEPTH-1:0]        rt_valid;
-    wire [FT_DEPTH*MEM_W-1:0]  rt_mem;
-    wire [FT_DEPTH*ADDR_W-1:0] rt_row;
-    wire [FT_DEPTH-1:0]        rt_is_global;
-    wire [FT_DEPTH*SIDX_W-1:0] rt_sidx;
+    wire [N_MEM*N_LOCAL-1:0]        lt_valid;
+    wire [N_MEM*N_LOCAL*ADDR_W-1:0] lt_row;
+    wire [GLB-1:0]                  gt_valid;
+    wire [GLB*MEM_W-1:0]            gt_mem;
+    wire [GLB*ADDR_W-1:0]           gt_row;
 
     repair_table #(
-        .FT_DEPTH (FT_DEPTH),
+        .N_MEM    (N_MEM),
+        .N_LOCAL  (N_LOCAL),
         .N_GLOBAL (N_GLOBAL),
         .MEM_W    (MEM_W),
         .ADDR_W   (ADDR_W),
         .SIDX_W   (SIDX_W),
-        .FIDX_W   (FIDX_W)
+        .GLB      (GLB)
     ) u_rtable (
         .clk          (clk),
         .rst_n        (rst_n),
         .clear        (c_clear),
         .we           (w_rt_we),
-        .idx          (w_rt_idx),
         .w_valid      (w_rt_valid),
         .w_mem        (w_rt_mem),
         .w_row        (w_rt_row),
         .w_is_global  (w_rt_is_global),
         .w_sidx       (w_rt_sidx),
-        .rt_valid     (rt_valid),
-        .rt_mem       (rt_mem),
-        .rt_row       (rt_row),
-        .rt_is_global (rt_is_global),
-        .rt_sidx      (rt_sidx)
+        .lt_valid     (lt_valid),
+        .lt_row       (lt_row),
+        .gt_valid     (gt_valid),
+        .gt_mem       (gt_mem),
+        .gt_row       (gt_row)
     );
 
     // ==================================================================
@@ -281,7 +282,6 @@ module shared_bisr_top #(
 
     remap_unit #(
         .N_MEM    (N_MEM),
-        .FT_DEPTH (FT_DEPTH),
         .N_LOCAL  (N_LOCAL),
         .N_GLOBAL (N_GLOBAL),
         .MEM_W    (MEM_W),
@@ -291,11 +291,11 @@ module shared_bisr_top #(
     ) u_remap (
         .remap_en     (c_remap_en),
         .acc_addr     (acc_addr),
-        .rt_valid     (rt_valid),
-        .rt_mem       (rt_mem),
-        .rt_row       (rt_row),
-        .rt_is_global (rt_is_global),
-        .rt_sidx      (rt_sidx),
+        .lt_valid     (lt_valid),
+        .lt_row       (lt_row),
+        .gt_valid     (gt_valid),
+        .gt_mem       (gt_mem),
+        .gt_row       (gt_row),
         .hit          (r_hit),
         .is_global    (r_is_global),
         .sidx         (r_sidx),

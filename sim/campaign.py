@@ -10,7 +10,9 @@ Two experiments:
 
   repair     k faulty rows (k = 0..KMAX) spread uniformly at random over the
              SRAMs, for each architecture:
-               shared   : N_LOCAL=1, N_GLOBAL=G   (proposed)
+               shared   : N_LOCAL=1, N_GLOBAL=G   (proposed, one controller)
+               clusC    : clusters of C SRAMs, each a shared controller
+                          with its own pool (only when N > C)
                ded1     : dedicated, 1 local spare per SRAM (baseline)
                ded2     : dedicated, 2 local spares per SRAM (equal/greater spares)
              -> Repair Coverage, Memory Repair Success, system pass rate,
@@ -35,6 +37,7 @@ testbench's reference model (match=1).
 Usage
   python3 campaign.py                         # paper defaults: N=2, 256x8
   python3 campaign.py --nmem 2 4 8 --rows 64  # scaling sweep
+  python3 campaign.py --nmem 8 16 --rows 32 --nglobal N --cluster 4
   python3 campaign.py --trials 500 --seed 7 --out results
 
 Outputs (in --out): runs.csv (every run), summary.csv, summary.md
@@ -63,13 +66,14 @@ def rtl_files():
     return sorted(os.path.join(RTL_DIR, f) for f in os.listdir(RTL_DIR) if f.endswith(".v"))
 
 
-def build(builddir, name, arch, nmem, rows, n_local, n_global, ftd):
+def build(builddir, name, arch, nmem, rows, n_local, n_global, ftd, cluster=4):
     vvp = os.path.join(builddir, name + ".vvp")
     cmd = ["iverilog", "-g2005", "-DFAULT_INJECT", "-I", os.path.join(RTL_DIR, "include"),
            "-s", "tb_top_scenarios",
            f"-Ptb_top_scenarios.ARCH={arch}", f"-Ptb_top_scenarios.N_MEM={nmem}",
            f"-Ptb_top_scenarios.ROWS={rows}", f"-Ptb_top_scenarios.N_LOCAL={n_local}",
            f"-Ptb_top_scenarios.N_GLOBAL={n_global}", f"-Ptb_top_scenarios.FT_DEPTH={ftd}",
+           f"-Ptb_top_scenarios.CLUSTER={cluster}",
            "-o", vvp] + rtl_files() + [TB]
     subprocess.run(cmd, check=True)
     return vvp
@@ -120,8 +124,8 @@ def random_rows(rng, nmem, rows, k):
 # --------------------------------------------------------------------------
 def exp_coverage(args, rng, builddir, writer):
     nmem = args.nmem[0]
-    ftd = max(8, 4 * nmem)
-    vvp = build(builddir, f"cov_n{nmem}", 0, nmem, args.rows, 1, args.nglobal, ftd)
+    ng = nmem if args.nglobal == "N" else int(args.nglobal)
+    vvp = build(builddir, f"cov_n{nmem}", 0, nmem, args.rows, 1, ng, max(8, nmem + ng))
     rows = []
     for ftype in range(4):
         sets = [[(0, rng.randrange(nmem), 0, rng.randrange(args.rows), rng.randrange(8), ftype)]
@@ -137,24 +141,34 @@ def exp_coverage(args, rng, builddir, writer):
     return rows
 
 
-def configs(nglobal):
-    #        name     arch nlocal nglobal
-    return [("shared", 0, 1, nglobal),
-            ("ded1",   1, 1, 0),
-            ("ded2",   1, 2, 0)]
+def configs(nmem, args):
+    """(name, arch, n_local, n_global [per cluster], ft_depth, cluster)
+
+    Fault tables are sized to each design's spare count (or --ftd8 for the
+    original 8-entry setup). --nglobal N means N_GLOBAL = N_MEM (pool grows
+    with the number of SRAMs, same 2N spares as ded2)."""
+    ng = nmem if args.nglobal == "N" else int(args.nglobal)
+    c = args.cluster
+    ft = lambda spares: 8 if args.ftd8 else spares
+    cfg = [("shared", 0, 1, ng, ft(nmem + ng), nmem),
+           ("ded1",   1, 1, 0,  ft(1), 1),
+           ("ded2",   1, 2, 0,  ft(2), 1)]
+    if c and nmem > c and nmem % c == 0:
+        ngc = c if args.nglobal == "N" else max(1, ng * c // nmem)
+        cfg.insert(1, (f"clus{c}", 2, 1, ngc, ft(c + ngc), c))
+    return cfg
 
 
 def exp_repair(args, rng, builddir, writer):
     summary = []
     for nmem in args.nmem:
-        ftd = max(8, 4 * nmem)
         kmax = args.kmax if args.kmax is not None else 2 * nmem + 2
         # same fault sets for every architecture (paired comparison)
         sets_by_k = {k: [random_rows(rng, nmem, args.rows, k) for _ in range(args.trials)]
                      for k in range(kmax + 1)}
-        for name, arch, nl, ng in configs(args.nglobal):
-            vvp = build(builddir, f"{name}_n{nmem}", arch, nmem, args.rows, nl, ng, ftd)
-            avail = nmem * nl + ng
+        for name, arch, nl, ng, ftd, clus in configs(nmem, args):
+            vvp = build(builddir, f"{name}_n{nmem}", arch, nmem, args.rows, nl, ng, ftd, clus)
+            avail = nmem * nl + ng * (nmem // clus if arch == 2 else 1)
             all_sets, keys = [], []
             for k in range(kmax + 1):
                 all_sets += sets_by_k[k]
@@ -209,7 +223,14 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--nmem", type=int, nargs="+", default=[2], help="SRAM counts to sweep")
     ap.add_argument("--rows", type=int, default=256)
-    ap.add_argument("--nglobal", type=int, default=2, help="global spares of the shared design")
+    ap.add_argument("--nglobal", default="2",
+                    help="global spares of the shared design, or N for N_GLOBAL = N_MEM")
+    ap.add_argument("--cluster", type=int, default=4,
+                    help="also run clustered_bisr_top with this many SRAMs per cluster "
+                         "when N_MEM > cluster (0 = off)")
+    ap.add_argument("--ftd8", action="store_true",
+                    help="8-entry fault tables everywhere (original setup) instead of "
+                         "tables sized to the spare count")
     ap.add_argument("--trials", type=int, default=200, help="fault sets per point")
     ap.add_argument("--kmax", type=int, default=None, help="max faulty rows (default 2N+2)")
     ap.add_argument("--seed", type=int, default=1)
@@ -238,7 +259,8 @@ def main():
 
     md = [f"# BISR campaign results\n",
           f"rows={args.rows}, width=8, trials/point={args.trials}, seed={args.seed}, "
-          f"shared = 1 local + {args.nglobal} global\n"]
+          f"shared = 1 local + {args.nglobal} global, cluster size {args.cluster}, "
+          f"fault tables {'8 entries' if args.ftd8 else 'sized to spares'}\n"]
     if cov:
         md += ["\n## Fault coverage (single-cell faults, March C-)\n",
                "| Fault model | Injected | Detected | Coverage (%) | Model mismatches |",
@@ -259,7 +281,7 @@ def main():
         ks = sorted({s["k"] for s in summ if s["nmem"] == nmem and s["k"] != "all"})
         md += [f"\n**N = {nmem}**\n", "| Arch | " + " | ".join(f"k={k}" for k in ks) + " |",
                "|---|" + "---|" * len(ks)]
-        for name, *_ in configs(args.nglobal):
+        for name, *_ in configs(nmem, args):
             row = {s["k"]: s for s in summ if s["nmem"] == nmem and s["arch"] == name}
             md.append(f"| {name} | " + " | ".join(fmt(row[k]["sys_pass"]) for k in ks) + " |")
     total_mism = sum(s["mismatch"] for s in summ if s["k"] == "all") + sum(r[4] for r in cov)

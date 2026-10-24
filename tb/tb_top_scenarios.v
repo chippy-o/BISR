@@ -1,7 +1,8 @@
 //============================================================================
 // tb_top_scenarios.v
-// System test for shared_bisr_top (ARCH = 0) or dedicated_bisr_top
-// (ARCH = 1), with a built-in reference model of the repair algorithm.
+// System test for shared_bisr_top (ARCH = 0), dedicated_bisr_top (ARCH = 1)
+// or clustered_bisr_top (ARCH = 2), with a built-in reference model of the
+// repair algorithm.
 //
 // For every run the testbench:
 //   1. injects faults (main rows, local spares, global spares)
@@ -23,26 +24,34 @@
 //                               9 = end of run (allows many runs per file)
 //                       type  : 0 SA0, 1 SA1, 2 TF-up, 3 TF-down
 //
-// Parameters: ARCH, N_MEM, ROWS, WIDTH, N_LOCAL, N_GLOBAL, FT_DEPTH, SPARE_GATING
+// Parameters: ARCH, N_MEM, ROWS, WIDTH, N_LOCAL, N_GLOBAL, FT_DEPTH, SPARE_GATING,
+//             CLUSTER (ARCH = 2). N_GLOBAL and FT_DEPTH are per cluster.
 //============================================================================
 `timescale 1ns/1ps
 `include "bisr_defines.vh"
 
 module tb_top_scenarios;
 
-    parameter ARCH         = 0;      // 0 = shared (proposed), 1 = dedicated
+    parameter ARCH         = 0;      // 0 = shared (proposed), 1 = dedicated, 2 = clustered
     parameter N_MEM        = 2;
     parameter ROWS         = 256;
     parameter WIDTH        = 8;
     parameter N_LOCAL      = 1;
-    parameter N_GLOBAL     = 2;      // ignored when ARCH = 1
+    parameter N_GLOBAL     = 2;      // ignored when ARCH = 1; per cluster when ARCH = 2
+    parameter CLUSTER      = 4;      // SRAMs per controller, ARCH = 2 only
     parameter FT_DEPTH     = 8;
     parameter SPARE_GATING = 1;
 
     localparam ADDR_W  = $clog2(ROWS);
     localparam LCNT_W  = $clog2(N_LOCAL + 1);
-    localparam NG      = (ARCH == 0) ? N_GLOBAL : 0;    // global spares present
+    // Every architecture is modelled as N_CL clusters of CL memories, each
+    // with NGC global spares and its own FT_DEPTH-entry fault table.
+    localparam CL      = (ARCH == 0) ? N_MEM : (ARCH == 1) ? 1 : CLUSTER;
+    localparam N_CL    = N_MEM / CL;
+    localparam NGC     = (ARCH == 1) ? 0 : N_GLOBAL;    // global spares per cluster
+    localparam NG      = NGC * N_CL;                    // global spares in total
     localparam NGA     = (NG > 0) ? NG : 1;             // array size helper
+    localparam CMEMW   = (CL > 1) ? $clog2(CL) : 1;     // memory-id width in a cluster
     localparam MAXF    = 64;                            // reference-model capacity
     localparam TIMEOUT = 40 * ROWS * N_MEM + 1000;      // cycles per BISR run
 
@@ -69,6 +78,19 @@ module tb_top_scenarios;
             shared_bisr_top #(
                 .N_MEM (N_MEM), .ROWS (ROWS), .WIDTH (WIDTH), .N_LOCAL (N_LOCAL),
                 .N_GLOBAL (N_GLOBAL), .FT_DEPTH (FT_DEPTH), .SPARE_GATING (SPARE_GATING)
+            ) dut (
+                .clk (clk), .rst_n (rst_n), .scan_en (scan_en), .bisr_start (bisr_start),
+                .bisr_busy (busy), .bisr_done (done), .bisr_pass (pass),
+                .bisr_unrepairable (unrep), .bisr_overflow (ovf), .bisr_verify_fail (vfail),
+                .bisr_fault_count (fcnt), .bisr_local_used (lused), .bisr_global_used (gused),
+                .func_addr (f_addr), .func_we (f_we), .func_re (f_re),
+                .func_wdata (f_wdata), .func_rdata (f_rdata)
+            );
+        end else if (ARCH == 2) begin : g_dut
+            clustered_bisr_top #(
+                .N_MEM (N_MEM), .CLUSTER (CLUSTER), .ROWS (ROWS), .WIDTH (WIDTH),
+                .N_LOCAL (N_LOCAL), .N_GLOBAL (N_GLOBAL), .FT_DEPTH (FT_DEPTH),
+                .SPARE_GATING (SPARE_GATING)
             ) dut (
                 .clk (clk), .rst_n (rst_n), .scan_en (scan_en), .bisr_start (bisr_start),
                 .bisr_busy (busy), .bisr_done (done), .bisr_pass (pass),
@@ -126,6 +148,31 @@ module tb_top_scenarios;
                         g_dut.dut.g_glb.u_pool.g_row[k].u_fi.clear_faults;
                 end
             end
+        end else if (ARCH == 2) begin : g_fi_clustered
+            for (g = 0; g < N_MEM; g = g + 1) begin : g_m
+                always @(inj_ev)
+                    if (inj_tgt == `TGT_MAIN && inj_mem == g)
+                        g_dut.dut.g_cl[g/CL].u_bisr.g_mem[g%CL].u_wrap.u_fi.add_fault(inj_row, inj_bit, inj_type);
+                always @(clr_ev)
+                    g_dut.dut.g_cl[g/CL].u_bisr.g_mem[g%CL].u_wrap.u_fi.clear_faults;
+                for (k = 0; k < N_LOCAL; k = k + 1) begin : g_l
+                    always @(inj_ev)
+                        if (inj_tgt == `TGT_LOCAL && inj_mem == g && inj_spare == k)
+                            g_dut.dut.g_cl[g/CL].u_bisr.g_mem[g%CL].u_wrap.u_local.g_row[k].u_fi.add_fault(0, inj_bit, inj_type);
+                    always @(clr_ev)
+                        g_dut.dut.g_cl[g/CL].u_bisr.g_mem[g%CL].u_wrap.u_local.g_row[k].u_fi.clear_faults;
+                end
+            end
+            // global spare s = row (s % NGC) of cluster (s / NGC)
+            if (NG > 0) begin : g_gp
+                for (k = 0; k < NG; k = k + 1) begin : g_g
+                    always @(inj_ev)
+                        if (inj_tgt == `TGT_GLOBAL && inj_spare == k)
+                            g_dut.dut.g_cl[k/NGC].u_bisr.g_glb.u_pool.g_row[k%NGC].u_fi.add_fault(0, inj_bit, inj_type);
+                    always @(clr_ev)
+                        g_dut.dut.g_cl[k/NGC].u_bisr.g_glb.u_pool.g_row[k%NGC].u_fi.clear_faults;
+                end
+            end
         end else begin : g_fi_dedicated
             for (g = 0; g < N_MEM; g = g + 1) begin : g_m
                 always @(inj_ev)
@@ -161,23 +208,44 @@ module tb_top_scenarios;
     //   pm_rep[m] : faulty rows of memory m given a spare (repair table)
     // Filled when pm_ev fires (after a BISR run).
     // ------------------------------------------------------------------
-    localparam MEMW = (N_MEM > 1) ? $clog2(N_MEM) : 1;
     integer pm_det [0:N_MEM-1];
     integer pm_rep [0:N_MEM-1];
     event   pm_ev;
 
+    // Memory m is memory (m % CL) of cluster (m / CL); with the spare-
+    // indexed repair table, memory j's repaired rows are its valid local
+    // slots plus the valid global slots it owns.
     generate
         if (ARCH == 0) begin : g_pm_shared
             for (g = 0; g < N_MEM; g = g + 1) begin : g_m
                 integer i;
                 always @(pm_ev) begin
                     pm_det[g] = 0; pm_rep[g] = 0;
-                    for (i = 0; i < FT_DEPTH; i = i + 1) begin
-                        if (g_dut.dut.ft_valid[i] && g_dut.dut.ft_mem[i*MEMW +: MEMW] == g)
+                    for (i = 0; i < FT_DEPTH; i = i + 1)
+                        if (g_dut.dut.ft_valid[i] && g_dut.dut.ft_mem[i*CMEMW +: CMEMW] == g)
                             pm_det[g] = pm_det[g] + 1;
-                        if (g_dut.dut.rt_valid[i] && g_dut.dut.rt_mem[i*MEMW +: MEMW] == g)
+                    for (i = 0; i < N_LOCAL; i = i + 1)
+                        if (g_dut.dut.lt_valid[g*N_LOCAL + i]) pm_rep[g] = pm_rep[g] + 1;
+                    for (i = 0; i < NGC; i = i + 1)
+                        if (g_dut.dut.gt_valid[i] && g_dut.dut.gt_mem[i*CMEMW +: CMEMW] == g)
                             pm_rep[g] = pm_rep[g] + 1;
-                    end
+                end
+            end
+        end else if (ARCH == 2) begin : g_pm_clustered
+            for (g = 0; g < N_MEM; g = g + 1) begin : g_m
+                integer i;
+                always @(pm_ev) begin
+                    pm_det[g] = 0; pm_rep[g] = 0;
+                    for (i = 0; i < FT_DEPTH; i = i + 1)
+                        if (g_dut.dut.g_cl[g/CL].u_bisr.ft_valid[i] &&
+                            g_dut.dut.g_cl[g/CL].u_bisr.ft_mem[i*CMEMW +: CMEMW] == g%CL)
+                            pm_det[g] = pm_det[g] + 1;
+                    for (i = 0; i < N_LOCAL; i = i + 1)
+                        if (g_dut.dut.g_cl[g/CL].u_bisr.lt_valid[(g%CL)*N_LOCAL + i]) pm_rep[g] = pm_rep[g] + 1;
+                    for (i = 0; i < NGC; i = i + 1)
+                        if (g_dut.dut.g_cl[g/CL].u_bisr.gt_valid[i] &&
+                            g_dut.dut.g_cl[g/CL].u_bisr.gt_mem[i*CMEMW +: CMEMW] == g%CL)
+                            pm_rep[g] = pm_rep[g] + 1;
                 end
             end
         end else begin : g_pm_dedicated
@@ -185,10 +253,10 @@ module tb_top_scenarios;
                 integer i;
                 always @(pm_ev) begin
                     pm_det[g] = 0; pm_rep[g] = 0;
-                    for (i = 0; i < FT_DEPTH; i = i + 1) begin
+                    for (i = 0; i < FT_DEPTH; i = i + 1)
                         if (g_dut.dut.g_inst[g].u_bisr.ft_valid[i]) pm_det[g] = pm_det[g] + 1;
-                        if (g_dut.dut.g_inst[g].u_bisr.rt_valid[i]) pm_rep[g] = pm_rep[g] + 1;
-                    end
+                    for (i = 0; i < N_LOCAL; i = i + 1)
+                        if (g_dut.dut.g_inst[g].u_bisr.lt_valid[i]) pm_rep[g] = pm_rep[g] + 1;
                 end
             end
         end
@@ -234,7 +302,7 @@ module tb_top_scenarios;
     endfunction
 
     task compute_expected;
-        integer i, j, m, kk, dup, distinct, excess, ovf_m, unrep_m;
+        integer i, j, m, c, kk, dup, distinct, excess, ovf_m, unrep_m, gu_c;
         begin
             for (m = 0; m < N_MEM; m = m + 1) rows_m[m] = 0;
             distinct = 0;
@@ -251,37 +319,31 @@ module tb_top_scenarios;
 
             e_vfail = 0; e_ovf = 0; e_unrep = 0; e_fcnt = 0; e_gused = 0;
 
-            if (ARCH == 0) begin
-                // shared: one table, local spares first, then the global pool
-                e_ovf  = (distinct > FT_DEPTH);
-                e_fcnt = imin(distinct, FT_DEPTH);
-                excess = 0;
-                for (m = 0; m < N_MEM; m = m + 1) begin
+            // Every architecture = N_CL independent clusters of CL memories:
+            // one fault table (FT_DEPTH), local spares first, then the
+            // cluster's NGC global spares (shared: N_CL = 1; dedicated: CL = 1,
+            // NGC = 0).
+            for (c = 0; c < N_CL; c = c + 1) begin
+                distinct = 0; excess = 0;
+                for (m = c*CL; m < (c+1)*CL; m = m + 1) begin
+                    distinct   = distinct + rows_m[m];
                     e_lused[m] = imin(rows_m[m], N_LOCAL);
                     excess     = excess + rows_m[m] - e_lused[m];
                 end
-                e_gused = imin(excess, NG);
-                e_unrep = e_ovf || (excess > NG);
-                if (!e_unrep) begin
-                    // an assigned spare that is itself faulty fails VERIFY
-                    for (m = 0; m < N_MEM; m = m + 1)
+                ovf_m   = (distinct > FT_DEPTH);
+                unrep_m = ovf_m || (excess > NGC);
+                gu_c    = imin(excess, NGC);
+                e_fcnt  = e_fcnt + imin(distinct, FT_DEPTH);
+                e_gused = e_gused + gu_c;
+                if (ovf_m)   e_ovf   = 1;
+                if (unrep_m) e_unrep = 1;
+                // an assigned spare that is itself faulty fails VERIFY
+                if (!unrep_m) begin
+                    for (m = c*CL; m < (c+1)*CL; m = m + 1)
                         for (kk = 0; kk < e_lused[m]; kk = kk + 1)
                             if (rf_lsp[m*N_LOCAL + kk]) e_vfail = 1;
-                    for (kk = 0; kk < e_gused; kk = kk + 1)
-                        if (rf_gsp[kk]) e_vfail = 1;
-                end
-            end else begin
-                // dedicated: every memory on its own, local spares only
-                for (m = 0; m < N_MEM; m = m + 1) begin
-                    ovf_m      = (rows_m[m] > FT_DEPTH);
-                    unrep_m    = ovf_m || (rows_m[m] > N_LOCAL);
-                    e_lused[m] = imin(rows_m[m], N_LOCAL);
-                    e_fcnt     = e_fcnt + imin(rows_m[m], FT_DEPTH);
-                    if (ovf_m)   e_ovf   = 1;
-                    if (unrep_m) e_unrep = 1;
-                    if (!unrep_m)
-                        for (kk = 0; kk < e_lused[m]; kk = kk + 1)
-                            if (rf_lsp[m*N_LOCAL + kk]) e_vfail = 1;
+                    for (kk = 0; kk < gu_c; kk = kk + 1)
+                        if (rf_gsp[c*NGC + kk]) e_vfail = 1;
                 end
             end
             e_pass = !e_unrep && !e_vfail;
@@ -424,14 +486,14 @@ module tb_top_scenarios;
 
             // S5: several bad bits in one row
             clear_faults;
-            inject(`TGT_MAIN, 0, 0, 50, 0, `FT_SA0);
-            inject(`TGT_MAIN, 0, 0, 50, 1, `FT_SA1);
-            inject(`TGT_MAIN, 0, 0, 50, 6, `FT_TF_UP);
+            inject(`TGT_MAIN, 0, 0, 50 % ROWS, 0, `FT_SA0);
+            inject(`TGT_MAIN, 0, 0, 50 % ROWS, 1, `FT_SA1);
+            inject(`TGT_MAIN, 0, 0, 50 % ROWS, 6, `FT_TF_UP);
             run_check("S5 3 bits, 1 row");
 
             // S6: the local spare that gets used is itself faulty
             clear_faults;
-            inject(`TGT_MAIN,  0, 0, 20, 0, `FT_SA1);
+            inject(`TGT_MAIN,  0, 0, 20 % ROWS, 0, `FT_SA1);
             inject(`TGT_LOCAL, 0, 0, 0,  2, `FT_SA0);
             run_check("S6 faulty spare");
 
@@ -554,10 +616,15 @@ module tb_top_scenarios;
     reg [8*256-1:0] fname;
 
     initial begin
-        if (ARCH == 0) $write("tb_top_scenarios: SHARED,");
-        else           $write("tb_top_scenarios: DEDICATED,");
+        if (ARCH == 0)      $write("tb_top_scenarios: SHARED,");
+        else if (ARCH == 1) $write("tb_top_scenarios: DEDICATED,");
+        else                $write("tb_top_scenarios: CLUSTERED (%0d per cluster),", CL);
         $display(" N_MEM=%0d ROWS=%0d WIDTH=%0d N_LOCAL=%0d N_GLOBAL=%0d FT_DEPTH=%0d",
                  N_MEM, ROWS, WIDTH, N_LOCAL, NG, FT_DEPTH);
+        if (N_MEM % CL != 0) begin
+            $display("ERROR: N_MEM must be a multiple of CLUSTER");
+            $finish;
+        end
         clear_faults;
         repeat (3) @(negedge clk);
         rst_n = 1'b1;

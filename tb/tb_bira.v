@@ -1,6 +1,7 @@
 //============================================================================
 // tb_bira.v
-// Unit test: bira writing into repair_table (N_MEM = 2, 1 local, 2 global).
+// Unit test: bira writing into the spare-indexed repair_table
+// (N_MEM = 2, 1 local, 2 global).
 //
 // The fault table is driven directly by the testbench.
 //   Case A (S2): mem0 row10, mem1 row200     -> local, local
@@ -45,20 +46,21 @@ module tb_bira;
         .unrepairable (unrep), .local_used (local_used), .global_used (global_used)
     );
 
-    wire [FT-1:0]        t_valid, t_ig;
-    wire [FT*MEM_W-1:0]  t_mem;
-    wire [FT*ADDR_W-1:0] t_row;
-    wire [FT*SIDX_W-1:0] t_sidx;
+    wire [N_MEM*N_LOCAL-1:0]        lt_valid;
+    wire [N_MEM*N_LOCAL*ADDR_W-1:0] lt_row;
+    wire [N_GLOBAL-1:0]             gt_valid;
+    wire [N_GLOBAL*MEM_W-1:0]       gt_mem;
+    wire [N_GLOBAL*ADDR_W-1:0]      gt_row;
 
     repair_table #(
-        .FT_DEPTH (FT), .N_GLOBAL (N_GLOBAL), .MEM_W (MEM_W), .ADDR_W (ADDR_W),
-        .SIDX_W (SIDX_W), .FIDX_W (FIDX_W)
+        .N_MEM (N_MEM), .N_LOCAL (N_LOCAL), .N_GLOBAL (N_GLOBAL),
+        .MEM_W (MEM_W), .ADDR_W (ADDR_W), .SIDX_W (SIDX_W)
     ) u_rt (
         .clk (clk), .rst_n (rst_n), .clear (clear),
-        .we (rt_we), .idx (rt_idx), .w_valid (rt_valid), .w_mem (rt_mem),
+        .we (rt_we), .w_valid (rt_valid), .w_mem (rt_mem),
         .w_row (rt_row), .w_is_global (rt_is_global), .w_sidx (rt_sidx),
-        .rt_valid (t_valid), .rt_mem (t_mem), .rt_row (t_row),
-        .rt_is_global (t_ig), .rt_sidx (t_sidx)
+        .lt_valid (lt_valid), .lt_row (lt_row),
+        .gt_valid (gt_valid), .gt_mem (gt_mem), .gt_row (gt_row)
     );
 
     integer n;
@@ -88,10 +90,8 @@ module tb_bira;
         end
     endtask
 
-    // entry e assigned as {valid, is_global, sidx}
-    function [2:0] ent(input integer e);
-        ent = {t_valid[e], t_ig[e], t_sidx[e]};
-    endfunction
+    function [ADDR_W-1:0] lrow(input integer slot); lrow = lt_row[slot*ADDR_W +: ADDR_W]; endfunction
+    function [ADDR_W-1:0] grow(input integer slot); grow = gt_row[slot*ADDR_W +: ADDR_W]; endfunction
 
     initial begin
         repeat (2) @(negedge clk);
@@ -100,17 +100,20 @@ module tb_bira;
         // Case A
         load_clear; add(0, 10); add(1, 200); run;
         check(!unrep && local_used == 2'b11 && global_used == 0, "A: 1 local each, no global");
-        check(ent(0) == 3'b100 && ent(1) == 3'b100 && t_mem[1] == 1, "A: entries local spare 0");
+        check(lt_valid == 2'b11 && gt_valid == 0 && lrow(0) == 10 && lrow(1) == 200,
+              "A: local slots mem0=10, mem1=200");
 
         // Case B
         load_clear; add(0, 5); add(0, 100); add(0, 250); run;
         check(!unrep && local_used == 2'b01 && global_used == 2, "B: local + 2 global");
-        check(ent(0) == 3'b100 && ent(1) == 3'b110 && ent(2) == 3'b111, "B: local0, global0, global1");
+        check(lt_valid == 2'b01 && lrow(0) == 5 && gt_valid == 2'b11 && gt_mem == 2'b00 &&
+              grow(0) == 100 && grow(1) == 250, "B: local0=5, global0=100, global1=250 (mem0)");
 
         // Case C
         load_clear; add(0, 1); add(0, 2); add(0, 3); add(0, 4); run;
         check(unrep && global_used == 2, "C: 4 rows -> unrepairable");
-        check(t_valid[3] == 1'b0, "C: 4th row left without a spare");
+        check(lt_valid == 2'b01 && lrow(0) == 1 && grow(0) == 2 && grow(1) == 3,
+              "C: rows 1,2,3 repaired, row 4 left without a spare");
 
         // Case D
         load_clear; ft_overflow = 1'b1; run;

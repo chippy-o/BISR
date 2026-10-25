@@ -572,6 +572,10 @@ module tb_bisr_compare;
                      KMAX, trials, seed_in);
             $display("  Every faulty row is placed in a random SRAM at a random row/bit with a");
             $display("  random fault type. Both designs get exactly the same fault sets.");
+            $display("  (one row is printed as soon as each K is finished)");
+            $display("");
+            $display("   K  | sets |   DEDICATED repaired    |    SHARED repaired      | mismatches");
+            $display("  ----+------+-------------------------+-------------------------+-----------");
             for (k = 0; k <= KMAX; k = k + 1) begin
                 runs_k[k] = 0; dd_ok_k[k] = 0; sh_ok_k[k] = 0; mism_k[k] = 0;
                 rows_k[k] = 0; dd_rep_k[k] = 0; sh_rep_k[k] = 0;
@@ -609,17 +613,13 @@ module tb_bisr_compare;
                     dd_rep_k[k] = dd_rep_k[k] + used_dd;
                     sh_rep_k[k] = sh_rep_k[k] + used_sh;
                 end
-            end
-
-            $display("");
-            $display("   K  | sets |   DEDICATED repaired    |    SHARED repaired      | mismatches");
-            $display("  ----+------+-------------------------+-------------------------+-----------");
-            for (k = 0; k <= KMAX; k = k + 1)
                 $display("  %3d | %4d | %4d of %4d (%5.1f %%) | %4d of %4d (%5.1f %%) |    %0d",
                          k, runs_k[k],
                          dd_ok_k[k], runs_k[k], 100.0 * dd_ok_k[k] / runs_k[k],
                          sh_ok_k[k], runs_k[k], 100.0 * sh_ok_k[k] / runs_k[k],
                          mism_k[k]);
+            end
+
         end
     endtask
 

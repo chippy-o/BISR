@@ -6,3 +6,10 @@ sim/modelsim/transcript
 *.vcd
 *.vvp
 *.log
+# ModelSim run.do outputs (repo root)
+/work/
+/transcript
+/compare_N*.log
+modelsim.ini
+# keep the sample reports in results/
+!results/*.log

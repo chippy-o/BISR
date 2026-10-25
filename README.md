@@ -4,6 +4,23 @@ RTL and verification for **"A Shared BISR Architecture with Local and Global
 Redundancy for Efficient SRAM Test and Repair"** (S. Tarun, C G S S Ratna Sashank,
 VIT Vellore).
 
+## Quick start (no paths to set)
+
+```
+git clone https://github.com/chippy-o/BISR.git
+cd BISR
+```
+
+| Tool | Do this | Then |
+|---|---|---|
+| **ModelSim** | `File > Change Directory...` to the `BISR` folder, then `do run.do` in the Transcript | `compare 2` / `compare 4 10 64` / `compare 8 10 64` / `tests` |
+| **Xcelium** | source Cadence setup | `bash run_xcelium.sh compare 2` (or `compare-all 100`, `tests`) |
+| **Genus** | source Cadence setup | `bash run_genus.sh` (area sweep, results in `syn/reports/area_summary.csv`) |
+
+`compare <N_MEM> [TRIALS] [ROWS]` runs `tb_bisr_compare`: shared vs dedicated
+BISR on identical faults, ending in `RESULT : ALL CHECKS PASSED` and the repair
+success rate of both designs. Reports are saved as `compare_N<n>.log`.
+
 One BISR controller serves several SRAMs. Each SRAM has its own **local** spare
 row(s); a small **global** pool of spare rows can be used by whichever SRAM runs
 out of local spares.

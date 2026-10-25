@@ -549,7 +549,7 @@ module tb_top_scenarios;
     // Random campaign
     // ------------------------------------------------------------------
     task random_runs(input integer n, input integer seed_in);
-        integer it, nf, f, seed, tgt, m, s;
+        integer it, nf, f, seed, tgt, m, s, r;
         begin
             seed  = seed_in;
             quiet = 1;
@@ -563,7 +563,8 @@ module tb_top_scenarios;
                            {$random(seed)} % 4);
                 // occasionally a faulty spare
                 if ({$random(seed)} % 6 == 0) begin
-                    tgt = (NG > 0 && ({$random(seed)} % 2)) ? `TGT_GLOBAL : `TGT_LOCAL;
+                    r   = {$random(seed)} % 2;      // always drawn, so every
+                    tgt = (NG > 0 && r) ? `TGT_GLOBAL : `TGT_LOCAL;   // ARCH sees the same stream
                     m   = {$random(seed)} % N_MEM;
                     s   = (tgt == `TGT_GLOBAL) ? {$random(seed)} % NGA : {$random(seed)} % N_LOCAL;
                     inject(tgt, m, s, 0, {$random(seed)} % WIDTH, {$random(seed)} % 4);

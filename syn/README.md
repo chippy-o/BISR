@@ -20,6 +20,17 @@ Results: `syn/reports/area_summary.csv` (one line per run), plus per run
 `_area.rpt` (per block), `_qor.rpt`, `_timing.rpt`, `_power.rpt`
 (vectorless) and `_area_split.rpt`.
 
+## Viewing results
+
+```
+bash syn/combine_reports.sh            # syn/combined/<design>_all.rpt (6 files)
+gedit syn/combined/*_all.rpt &
+bash syn/view.sh shared_n4             # Genus GUI with that design loaded
+```
+Inside the GUI session: `show dedicated_n4` switches design;
+`report_area`, `report_qor`, `report_timing`, `report_power` print reports.
+Schematic: right-click the top module in the hierarchy browser.
+
 ## Runs
 
 The same two designs that `tb_bisr_compare` simulates, both with 2N spare rows:

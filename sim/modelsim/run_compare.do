@@ -1,4 +1,7 @@
 # =============================================================================
+# NOTE: parameters are overridden with their full path (-G/tb/PARAM). A plain
+#       -GPARAM overrides that name in EVERY module, including the N_MEM = 1
+#       inside each dedicated BISR, which breaks the design.
 # ModelSim / Questa: SHARED vs DEDICATED repair verification (tb_bisr_compare)
 #
 #   cd sim/modelsim
@@ -21,7 +24,7 @@ vlog -work work +define+FAULT_INJECT +incdir+../../rtl/include \
 
 foreach N {2 4 8} {
     transcript file compare_N$N.log
-    vsim -c -quiet -GN_MEM=$N work.tb_bisr_compare +TRIALS=$TRIALS
+    vsim -c -quiet -G/tb_bisr_compare/N_MEM=$N work.tb_bisr_compare +TRIALS=$TRIALS
     run -all
     quit -sim
 }

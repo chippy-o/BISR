@@ -43,7 +43,9 @@
 //
 // Run (ModelSim):
 //   vlog +define+FAULT_INJECT +incdir+<rtl/include> rtl/*.v tb/tb_bisr_compare.v
-//   vsim -c -GN_MEM=4 work.tb_bisr_compare +TRIALS=50 -do "run -all; quit"
+//   vsim -c -G/tb_bisr_compare/N_MEM=4 work.tb_bisr_compare +TRIALS=50 -do "run -all; quit"
+//   (use the full path: a plain -GN_MEM also overrides the N_MEM = 1 inside
+//    every dedicated BISR and breaks it)
 //============================================================================
 `timescale 1ns/1ps
 `include "bisr_defines.vh"

@@ -48,5 +48,8 @@ EOF
 done
 
 echo
+bash combine_reports.sh                # one file per design in syn/combined/
+
+echo
 echo "==== reports/area_summary.csv"
 column -s, -t < reports/area_summary.csv 2>/dev/null || cat reports/area_summary.csv

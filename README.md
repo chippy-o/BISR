@@ -42,6 +42,7 @@ Repair sequence: `IDLE → CLEAR → TEST → ANALYZE → LOAD → VERIFY → DO
 | `rtl/shared_bisr_top.v` | **Proposed design** |
 | `rtl/dedicated_bisr_top.v` | **Baseline**: one full BISR per SRAM, local spares only |
 | `rtl/clustered_bisr_top.v` | **Scalable version**: SRAMs in clusters of `CLUSTER`, one shared controller + global pool per cluster |
+| `tb/tb_bisr_compare.v` | **Shared vs dedicated report**: same faults into both designs, readable per-test output, repair success rate |
 | `tb/tb_*.v` | Unit testbenches + system testbench with reference model |
 | `sim/Makefile` | Icarus Verilog runs |
 | `sim/modelsim/*.do` | ModelSim / Questa batch and GUI scripts |
@@ -77,6 +78,22 @@ controller, `N_GLOBAL = CLUSTER` per cluster), so the shared design always has
 the same 2N spares as the 2-local-spare dedicated baseline. Remap compare
 logic is `N_MEM*N_LOCAL + N_MEM*N_GLOBAL` comparators per controller; with the
 pool growing as N this is O(N^2) for one controller and O(N) with clusters.
+
+## Shared vs dedicated report (`tb_bisr_compare`)
+
+Builds both designs for the same SRAMs and the same spare count
+(dedicated: 2 local spares per SRAM; shared: 1 local per SRAM + a global pool
+of 1 per SRAM, at most 4 SRAMs per controller), injects identical faults,
+checks both against a reference model, and read/write-checks every row after
+repair. Prints 8 directed tests, a random-campaign table (repair rate per
+number of faulty rows K) and a summary with repair success rate and repair
+coverage.
+
+```
+cd sim/modelsim && vsim -c -do run_compare.do        # N = 2, 4, 8
+cd sim && make compare NMEM=4 TRIALS=50              # Icarus
+```
+Plusargs: `+TRIALS=<n>` `+SEED=<s>` `+VERBOSE` (print every random run).
 
 ## Running the simulations
 

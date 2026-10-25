@@ -1,23 +1,29 @@
 //============================================================================
 // clustered_bisr_top.v
-// SCALABLE ARCHITECTURE: N_MEM SRAMs split into clusters of CLUSTER SRAMs.
-// Each cluster is one shared_bisr_top (one controller, one March C- MBIST,
-// one fault logger / BIRA / repair table / remap, and its own global pool of
-// N_GLOBAL spare rows). SRAMs borrow global spares only inside their cluster.
+// SHARED BISR - top level used for any number of SRAMs.
 //
-// Why: inside one shared controller the remap compares every memory with
-// every global slot (N_MEM * N_GLOBAL comparators). With the global pool
-// growing with N (N_GLOBAL = N), that is O(N^2). Bounding the cluster size
-// makes the total O(N): N/CLUSTER clusters, each with CLUSTER*N_GLOBAL
-// comparators. The cluster size trades repair flexibility (how many SRAMs
-// can share a pool) against remap area.
+// The SRAMs are split into groups ("clusters") of CLUSTER SRAMs. Each group
+// is served by ONE shared_bisr_top: one control FSM, one March C- MBIST, one
+// fault logger, one BIRA, one repair table, one remap unit, and a global pool
+// of N_GLOBAL spare rows that any SRAM of the group can borrow. Each SRAM
+// also has N_LOCAL local spare rows of its own.
 //
-//   CLUSTER = N_MEM                 -> identical to shared_bisr_top
-//   CLUSTER = 1, N_GLOBAL = 0       -> identical to dedicated_bisr_top
+//   N_MEM = 8, CLUSTER = 4:
+//     SRAM0..SRAM3 -- shared controller 0 -- global pool 0
+//     SRAM4..SRAM7 -- shared controller 1 -- global pool 1
 //
-// Clusters run their BISR in parallel, so test time is set by CLUSTER, not
-// by N_MEM. Ports match shared_bisr_top; memory m is SRAM (m % CLUSTER) of
-// cluster (m / CLUSTER). Status outputs are combined across clusters.
+// Why groups: the remap unit compares every SRAM address with every global
+// spare slot (N_MEM * N_GLOBAL comparators per controller). With the pool
+// growing with the number of SRAMs, one controller for many SRAMs grows as
+// N^2. Capping the group size keeps the total linear in N.
+//
+//   CLUSTER = N_MEM                 -> one shared controller for all SRAMs
+//   CLUSTER = 1, N_GLOBAL = 0       -> same as dedicated_bisr_top
+//
+// Groups run their BISR in parallel, so test time depends on CLUSTER, not
+// on N_MEM. Ports match shared_bisr_top and dedicated_bisr_top; SRAM m is
+// SRAM (m % CLUSTER) of group (m / CLUSTER). Status outputs are combined
+// over all groups (pass = every group passed).
 //
 // N_MEM must be a multiple of CLUSTER.
 //============================================================================

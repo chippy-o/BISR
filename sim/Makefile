@@ -9,6 +9,7 @@
 #   make clustered    directed scenarios, clustered (CLUS SRAMs per controller,
 #                     NGLB global spares and FTD entries per cluster)
 #   make random       random campaign on all three (N=$(NRAND), SEED=$(SEED))
+#   make compare      shared vs dedicated report (tb_bisr_compare), NMEM/TRIALS
 #   make clean
 #
 # Override sizes, e.g.  make shared ROWS=64 NMEM=4 FTD=8 NGLB=4
@@ -34,7 +35,7 @@ TOP_PARAMS = -Ptb_top_scenarios.ROWS=$(ROWS) -Ptb_top_scenarios.N_MEM=$(NMEM) \
              -Ptb_top_scenarios.FT_DEPTH=$(FTD) -Ptb_top_scenarios.N_GLOBAL=$(NGLB) \
              -Ptb_top_scenarios.CLUSTER=$(CLUS)
 
-.PHONY: all unit shared dedicated equal clustered random clean
+.PHONY: all unit shared dedicated equal clustered random compare clean
 
 all: unit shared dedicated equal random
 
@@ -82,6 +83,14 @@ random: $(OUT)/shared.vvp $(OUT)/dedicated.vvp $(OUT)/equal.vvp
 	  echo "== $$cfg"; \
 	  $(VVP) -n $(OUT)/$$cfg.vvp +RANDOM=$(NRAND) +SEED=$(SEED) | grep -v "^RESULT"; \
 	done
+
+# ---------------- shared vs dedicated report ----------------
+#   make compare NMEM=4 TRIALS=50
+TRIALS ?= 20
+compare: | $(OUT)
+	$(IVERILOG) $(FLAGS) -s tb_bisr_compare -Ptb_bisr_compare.N_MEM=$(NMEM) \
+	  -Ptb_bisr_compare.ROWS=$(ROWS) -o $(OUT)/compare.vvp $(RTL) ../tb/tb_bisr_compare.v
+	$(VVP) -n $(OUT)/compare.vvp +TRIALS=$(TRIALS)
 
 clean:
 	rm -rf $(OUT)

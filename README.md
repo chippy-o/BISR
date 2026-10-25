@@ -15,7 +15,7 @@ cd BISR
 |---|---|---|
 | **ModelSim** | `File > Change Directory...` to the `BISR` folder, then `do run.do` in the Transcript | `compare 2` / `compare 4 10 64` / `compare 8 10 64` / `tests` |
 | **Xcelium** | source Cadence setup | `bash run_xcelium.sh compare 2` (or `compare-all 100`, `tests`) |
-| **Genus** | source Cadence setup | `bash run_genus.sh` (area sweep, results in `syn/reports/area_summary.csv`) |
+| **Genus** | source Cadence setup | `bash run_genus.sh` (shared vs dedicated at 2/4/8 SRAMs, results in `syn/reports/area_summary.csv`) |
 
 `compare <N_MEM> [TRIALS] [ROWS]` runs `tb_bisr_compare`: shared vs dedicated
 BISR on identical faults, ending in `RESULT : ALL CHECKS PASSED` and the repair
@@ -66,7 +66,7 @@ Repair sequence: `IDLE → CLEAR → TEST → ANALYZE → LOAD → VERIFY → DO
 | `sim/xcelium/` | Xcelium file list (`files.f`) and run script (`run_xcelium.sh`) |
 | `sim/rtl_files.f` | Synthesisable file list |
 | `sim/campaign.py` | Fault-injection campaigns: fault coverage, repair coverage, memory repair success, spare utilization |
-| `syn/` | Genus area sweep (shared / clustered / dedicated, N = 2..16) |
+| `syn/` | Genus area: shared vs dedicated at 2, 4, 8 SRAMs |
 | `results/` | Campaign summaries and Yosys area estimates |
 
 ## Parameters (`shared_bisr_top`)

@@ -8,28 +8,28 @@ medium effort, hierarchy kept), updated for the spare-indexed repair table and
 
 ```
 # source the Cadence environment first, then from the repository root:
-cd syn
-bash run_sweep.sh          # all 17 runs
-bash run_sweep.sh p2_      # only the N=2 paper-setup runs
+bash run_genus.sh              # 6 runs
+bash run_genus.sh shared       # only shared
+bash run_genus.sh dedicated    # only dedicated
 ```
 
-Every sweep run black-boxes `sram_array`, so the area is **BISR logic + spare
-rows only**: the part that differs between the architectures. The SRAM arrays
-are identical in every design.
+Every run black-boxes `sram_array`, so the area is **BISR logic + spare
+rows only**: the part that differs between the designs.
 
-Results: `reports/area_summary.csv` (one line per run), plus per run
-`_area.rpt` (per block), `_qor.rpt`, `_timing.rpt` (real critical path now),
-`_power.rpt` (vectorless) and `_area_split.rpt`.
+Results: `syn/reports/area_summary.csv` (one line per run), plus per run
+`_area.rpt` (per block), `_qor.rpt`, `_timing.rpt`, `_power.rpt`
+(vectorless) and `_area_split.rpt`.
 
 ## Runs
 
-| Name | Top | Configuration | Purpose |
-|---|---|---|---|
-| `p2_shared_ft8`, `p2_ded1_ft8`, `p2_ded2_ft8` | shared / dedicated | N = 2, 8-entry fault tables | Original paper setup, new RTL |
-| `sh_nN` (N = 2, 4, 8, 16) | `shared_bisr_top` | 1 local + N global, FT_DEPTH = 2N | One controller for all SRAMs |
-| `cl_nN` (N = 8, 16) | `clustered_bisr_top` | clusters of 4, 4 global per cluster, FT_DEPTH = 8 | Bounded sharing domain |
-| `d1_nN` | `dedicated_bisr_top` | 1 local, FT_DEPTH = 1 | Baseline |
-| `d2_nN` | `dedicated_bisr_top` | 2 local, FT_DEPTH = 2 | Same 2N spares as `sh_nN` / `cl_nN` |
+The same two designs that `tb_bisr_compare` simulates, both with 2N spare rows:
+
+| Run | Top | Configuration |
+|---|---|---|
+| `shared_n2` | `clustered_bisr_top` | 2 SRAMs, 1 controller, 1 local/SRAM + 2 global |
+| `shared_n4` | `clustered_bisr_top` | 4 SRAMs, 1 controller, 1 local/SRAM + 4 global |
+| `shared_n8` | `clustered_bisr_top` | 8 SRAMs, 2 controllers (4 SRAMs each), 1 local/SRAM + 4 global per controller |
+| `dedicated_n2/4/8` | `dedicated_bisr_top` | one controller per SRAM, 2 local spares each |
 
 Fault tables are sized to each design's spare count: a single-pass BIRA can
 never repair more rows than it has spares, and overflow already flags

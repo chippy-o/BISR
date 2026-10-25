@@ -46,6 +46,7 @@ Repair sequence: `IDLE → CLEAR → TEST → ANALYZE → LOAD → VERIFY → DO
 | `tb/tb_*.v` | Unit testbenches + system testbench with reference model |
 | `sim/Makefile` | Icarus Verilog runs |
 | `sim/modelsim/*.do` | ModelSim / Questa batch and GUI scripts |
+| `sim/xcelium/` | Xcelium file list (`files.f`) and run script (`run_xcelium.sh`) |
 | `sim/rtl_files.f` | Synthesisable file list |
 | `sim/campaign.py` | Fault-injection campaigns: fault coverage, repair coverage, memory repair success, spare utilization |
 | `syn/` | Genus area sweep (shared / clustered / dedicated, N = 2..16) |
@@ -94,6 +95,18 @@ cd sim/modelsim && vsim -c -do run_compare.do        # N = 2, 4, 8
 cd sim && make compare NMEM=4 TRIALS=50              # Icarus
 ```
 Plusargs: `+TRIALS=<n>` `+SEED=<s>` `+VERBOSE` (print every random run).
+
+## Xcelium
+
+```
+# source the Cadence environment, then from the repository root:
+bash sim/xcelium/run_xcelium.sh compare 2          # shared vs dedicated, 2 SRAMs
+bash sim/xcelium/run_xcelium.sh compare-all 100    # 2, 4, 8 SRAMs, 100 sets per K
+bash sim/xcelium/run_xcelium.sh tests              # unit + system tests
+```
+File list: `sim/xcelium/files.f`. Logs: `sim/xcelium/logs/`.
+Testbench parameters are set with `-defparam tb_bisr_compare.N_MEM=...`
+(never a global N_MEM override: the dedicated design uses N_MEM = 1 inside).
 
 ## Running the simulations
 

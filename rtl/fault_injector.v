@@ -28,7 +28,7 @@
 module fault_injector #(
     parameter ROWS   = 256,
     parameter WIDTH  = 8,
-    parameter NF     = 8,                         // max faults per instance
+    parameter NF     = 32,                        // max faults per instance
     parameter ADDR_W = (ROWS > 1) ? $clog2(ROWS) : 1
 )(
     input  wire [ADDR_W-1:0] addr,       // row being accessed

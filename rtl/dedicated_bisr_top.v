@@ -23,7 +23,7 @@ module dedicated_bisr_top #(
     parameter ROWS         = 256,
     parameter WIDTH        = 8,
     parameter N_LOCAL      = 1,
-    parameter FT_DEPTH     = 8,
+    parameter FT_DEPTH     = N_LOCAL,   // per instance (= its spares)
     parameter SPARE_GATING = 1,
     // derived - do not override
     parameter ADDR_W = (ROWS > 1) ? $clog2(ROWS) : 1,

@@ -13,3 +13,4 @@ rtl/remap_unit.v
 rtl/bisr_ctrl_fsm.v
 rtl/shared_bisr_top.v
 rtl/dedicated_bisr_top.v
+rtl/clustered_bisr_top.v

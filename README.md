@@ -34,17 +34,23 @@ Repair sequence: `IDLE → CLEAR → TEST → ANALYZE → LOAD → VERIFY → DO
 | `rtl/spare_row_bank.v` | K spare rows with per-row ports and gating (local spares and global pool) |
 | `rtl/sram_wrapper.v` | Main array + local spares + read mux + registered read port |
 | `rtl/march_cminus.v` | Shared March C- MBIST controller |
-| `rtl/fault_logger.v` | 8-entry fault table with row merge and overflow |
+| `rtl/fault_logger.v` | `FT_DEPTH`-entry fault table with row merge and overflow |
 | `rtl/bira.v` | Single-pass local-then-global redundancy analysis |
-| `rtl/repair_table.v` | Final spare assignments |
-| `rtl/remap_unit.v` | Address CAM, spare steering, spare enables |
+| `rtl/repair_table.v` | Spare-indexed repair table: one slot per local spare (row) and per global spare (owner + row) |
+| `rtl/remap_unit.v` | Address compare (own local slots + global slots), spare steering, spare enables |
 | `rtl/bisr_ctrl_fsm.v` | Top-level sequencer |
 | `rtl/shared_bisr_top.v` | **Proposed design** |
 | `rtl/dedicated_bisr_top.v` | **Baseline**: one full BISR per SRAM, local spares only |
+| `rtl/clustered_bisr_top.v` | **Scalable version**: SRAMs in clusters of `CLUSTER`, one shared controller + global pool per cluster |
+| `tb/tb_bisr_compare.v` | **Shared vs dedicated report**: same faults into both designs, readable per-test output, repair success rate |
 | `tb/tb_*.v` | Unit testbenches + system testbench with reference model |
 | `sim/Makefile` | Icarus Verilog runs |
 | `sim/modelsim/*.do` | ModelSim / Questa batch and GUI scripts |
+| `sim/xcelium/` | Xcelium file list (`files.f`) and run script (`run_xcelium.sh`) |
 | `sim/rtl_files.f` | Synthesisable file list |
+| `sim/campaign.py` | Fault-injection campaigns: fault coverage, repair coverage, memory repair success, spare utilization |
+| `syn/` | Genus area sweep (shared / clustered / dedicated, N = 2..16) |
+| `results/` | Campaign summaries and Yosys area estimates |
 
 ## Parameters (`shared_bisr_top`)
 
@@ -54,11 +60,53 @@ Repair sequence: `IDLE → CLEAR → TEST → ANALYZE → LOAD → VERIFY → DO
 | `ROWS`, `WIDTH` | 256, 8 | SRAM size |
 | `N_LOCAL` | 1 | Local spare rows per SRAM |
 | `N_GLOBAL` | 2 | Shared global spare rows (0 = none) |
-| `FT_DEPTH` | 8 | Fault-table / repair-table entries |
+| `FT_DEPTH` | `N_MEM*N_LOCAL + N_GLOBAL` | Fault-table entries (= total spares; a single-pass BIRA cannot repair more rows than it has spares, and overflow already flags "unrepairable"). The repair table is sized by the spares, not by `FT_DEPTH`. |
 | `SPARE_GATING` | 1 | 1 = selective spare activation, 0 = all spares clocked (power reference) |
 
 `dedicated_bisr_top` has the same ports. With `N_LOCAL=1` it is the dedicated
-baseline; with `N_LOCAL=2` it is the equal-total-spares baseline.
+baseline; with `N_LOCAL=2` it is the equal-total-spares baseline. Its
+`FT_DEPTH` (per SRAM) defaults to `N_LOCAL`.
+
+`clustered_bisr_top` has the same ports plus `CLUSTER` (SRAMs per controller,
+default 4). `N_GLOBAL` and `FT_DEPTH` are per cluster (defaults `CLUSTER` and
+`CLUSTER*N_LOCAL + N_GLOBAL`). `N_MEM` must be a multiple of `CLUSTER`.
+`CLUSTER = N_MEM` gives the single shared controller.
+
+### Scaling rule
+
+The global pool grows with the number of SRAMs (`N_GLOBAL = N_MEM` for one
+controller, `N_GLOBAL = CLUSTER` per cluster), so the shared design always has
+the same 2N spares as the 2-local-spare dedicated baseline. Remap compare
+logic is `N_MEM*N_LOCAL + N_MEM*N_GLOBAL` comparators per controller; with the
+pool growing as N this is O(N^2) for one controller and O(N) with clusters.
+
+## Shared vs dedicated report (`tb_bisr_compare`)
+
+Builds both designs for the same SRAMs and the same spare count
+(dedicated: 2 local spares per SRAM; shared: 1 local per SRAM + a global pool
+of 1 per SRAM, at most 4 SRAMs per controller), injects identical faults,
+checks both against a reference model, and read/write-checks every row after
+repair. Prints 8 directed tests, a random-campaign table (repair rate per
+number of faulty rows K) and a summary with repair success rate and repair
+coverage.
+
+```
+cd sim/modelsim && vsim -c -do run_compare.do        # N = 2, 4, 8
+cd sim && make compare NMEM=4 TRIALS=50              # Icarus
+```
+Plusargs: `+TRIALS=<n>` `+SEED=<s>` `+VERBOSE` (print every random run).
+
+## Xcelium
+
+```
+# source the Cadence environment, then from the repository root:
+bash sim/xcelium/run_xcelium.sh compare 2          # shared vs dedicated, 2 SRAMs
+bash sim/xcelium/run_xcelium.sh compare-all 100    # 2, 4, 8 SRAMs, 100 sets per K
+bash sim/xcelium/run_xcelium.sh tests              # unit + system tests
+```
+File list: `sim/xcelium/files.f`. Logs: `sim/xcelium/logs/`.
+Testbench parameters are set with `-defparam tb_bisr_compare.N_MEM=...`
+(never a global N_MEM override: the dedicated design uses N_MEM = 1 inside).
 
 ## Running the simulations
 
@@ -73,7 +121,8 @@ vsim -do run_gui.do         # shared design with waveforms
 ```
 cd sim
 make all                    # unit tests, three architectures, random campaigns
-make shared ROWS=64 NMEM=4  # other sizes
+make shared ROWS=64 NMEM=4 FTD=8 NGLB=4     # other sizes
+make clustered NMEM=8 CLUS=4 NGLB=4 FTD=8     # clustered design
 ```
 
 Every testbench is self-checking and ends with `ALL CHECKS PASSED` or

@@ -23,22 +23,27 @@ foreach tb {tb_sram_injector tb_march tb_logger tb_bira tb_remap} {
 
 # ---------------- system tests ----------------
 # proposed shared BISR (1 local / SRAM + 2 global)
-vsim -c -quiet -GARCH=0 work.tb_top_scenarios
+vsim -c -quiet -G/tb_top_scenarios/ARCH=0 work.tb_top_scenarios
 run -all
 quit -sim
 
 # dedicated baseline (1 local / SRAM)
-vsim -c -quiet -GARCH=1 work.tb_top_scenarios
+vsim -c -quiet -G/tb_top_scenarios/ARCH=1 work.tb_top_scenarios
 run -all
 quit -sim
 
 # equal-total-spares baseline (2 local / SRAM)
-vsim -c -quiet -GARCH=1 -GN_LOCAL=2 work.tb_top_scenarios
+vsim -c -quiet -G/tb_top_scenarios/ARCH=1 -G/tb_top_scenarios/N_LOCAL=2 work.tb_top_scenarios
+run -all
+quit -sim
+
+# clustered: 8 SRAMs in 2 clusters of 4, 4 global spares per cluster
+vsim -c -quiet -G/tb_top_scenarios/ARCH=2 -G/tb_top_scenarios/N_MEM=8 -G/tb_top_scenarios/CLUSTER=4 -G/tb_top_scenarios/N_GLOBAL=4 -G/tb_top_scenarios/FT_DEPTH=8 -G/tb_top_scenarios/ROWS=64 work.tb_top_scenarios
 run -all
 quit -sim
 
 # random campaign on the shared design
-vsim -c -quiet -GARCH=0 work.tb_top_scenarios +RANDOM=200 +SEED=1
+vsim -c -quiet -G/tb_top_scenarios/ARCH=0 work.tb_top_scenarios +RANDOM=200 +SEED=1
 run -all
 quit -sim
 

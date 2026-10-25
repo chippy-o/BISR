@@ -6,10 +6,15 @@
 #   make shared       directed scenarios, proposed shared BISR
 #   make dedicated    directed scenarios, dedicated baseline (1 local spare)
 #   make equal        directed scenarios, dedicated with 2 local spares
+#   make clustered    directed scenarios, clustered (CLUS SRAMs per controller,
+#                     NGLB global spares and FTD entries per cluster)
 #   make random       random campaign on all three (N=$(NRAND), SEED=$(SEED))
+#   make compare      shared vs dedicated report (tb_bisr_compare), NMEM/TRIALS
 #   make clean
 #
-# Override sizes, e.g.  make shared ROWS=64 NMEM=4
+# Override sizes, e.g.  make shared ROWS=64 NMEM=4 FTD=8 NGLB=4
+#                       make clustered NMEM=8 CLUS=4 NGLB=4 FTD=8
+# (run `make clean` between different sizes)
 #=============================================================================
 
 IVERILOG = iverilog
@@ -20,12 +25,17 @@ OUT      = build
 
 ROWS  ?= 256
 NMEM  ?= 2
+FTD   ?= 8
+NGLB  ?= 2
+CLUS  ?= 4
 NRAND ?= 200
 SEED  ?= 1
 
-TOP_PARAMS = -Ptb_top_scenarios.ROWS=$(ROWS) -Ptb_top_scenarios.N_MEM=$(NMEM)
+TOP_PARAMS = -Ptb_top_scenarios.ROWS=$(ROWS) -Ptb_top_scenarios.N_MEM=$(NMEM) \
+             -Ptb_top_scenarios.FT_DEPTH=$(FTD) -Ptb_top_scenarios.N_GLOBAL=$(NGLB) \
+             -Ptb_top_scenarios.CLUSTER=$(CLUS)
 
-.PHONY: all unit shared dedicated equal random clean
+.PHONY: all unit shared dedicated equal clustered random compare clean
 
 all: unit shared dedicated equal random
 
@@ -52,6 +62,13 @@ $(OUT)/equal.vvp: $(RTL) ../tb/tb_top_scenarios.v | $(OUT)
 	$(IVERILOG) $(FLAGS) -s tb_top_scenarios $(TOP_PARAMS) \
 	  -Ptb_top_scenarios.ARCH=1 -Ptb_top_scenarios.N_LOCAL=2 -o $@ $(RTL) ../tb/tb_top_scenarios.v
 
+$(OUT)/clustered.vvp: $(RTL) ../tb/tb_top_scenarios.v | $(OUT)
+	$(IVERILOG) $(FLAGS) -s tb_top_scenarios $(TOP_PARAMS) \
+	  -Ptb_top_scenarios.ARCH=2 -o $@ $(RTL) ../tb/tb_top_scenarios.v
+
+clustered: $(OUT)/clustered.vvp
+	$(VVP) -n $< | grep -v "^RESULT"
+
 shared: $(OUT)/shared.vvp
 	$(VVP) -n $< | grep -v "^RESULT"
 
@@ -66,6 +83,14 @@ random: $(OUT)/shared.vvp $(OUT)/dedicated.vvp $(OUT)/equal.vvp
 	  echo "== $$cfg"; \
 	  $(VVP) -n $(OUT)/$$cfg.vvp +RANDOM=$(NRAND) +SEED=$(SEED) | grep -v "^RESULT"; \
 	done
+
+# ---------------- shared vs dedicated report ----------------
+#   make compare NMEM=4 TRIALS=50
+TRIALS ?= 20
+compare: | $(OUT)
+	$(IVERILOG) $(FLAGS) -s tb_bisr_compare -Ptb_bisr_compare.N_MEM=$(NMEM) \
+	  -Ptb_bisr_compare.ROWS=$(ROWS) -o $(OUT)/compare.vvp $(RTL) ../tb/tb_bisr_compare.v
+	$(VVP) -n $(OUT)/compare.vvp +TRIALS=$(TRIALS)
 
 clean:
 	rm -rf $(OUT)
